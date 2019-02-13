@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"testing"
 
 	"github.com/docker/oscalkit/impl"
@@ -438,6 +439,10 @@ func TestProcessSetParam(t *testing.T) {
 				},
 			},
 		},
+		profile.SetParam{
+			Id:          parameterID,
+			Constraints: []catalog.Constraint{},
+		},
 	}
 	controls := []catalog.Control{
 		catalog.Control{
@@ -519,4 +524,232 @@ func failTest(err error, t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+}
+
+func TestMakeURL(t *testing.T) {
+	httpURI, _ := url.Parse("http://localhost:3000/v1/tests/profiles")
+	relpath, _ := url.Parse("../users")
+
+	expectedOutput, _ := url.Parse("http://localhost:3000/v1/users")
+
+	out, _ := makeURL(httpURI, relpath)
+	if expectedOutput.String() != out.String() {
+		t.Fail()
+	}
+}
+
+func TestSetBasePathWithRelPath(t *testing.T) {
+	relativePath := "./something.xml"
+	absoulePath, _ := filepath.Abs(relativePath)
+	p := &profile.Profile{
+		Imports: []profile.Import{
+			profile.Import{
+				Href: &catalog.Href{
+					URL: func() *url.URL {
+						x, _ := url.Parse(relativePath)
+						return x
+					}(),
+				},
+			},
+		},
+	}
+	p, err := SetBasePath(p, "")
+	if err != nil {
+		t.Error(err)
+	}
+	if p.Imports[0].Href.String() != absoulePath {
+		t.Fail()
+	}
+}
+
+func TestSetBasePathWithHttpPath(t *testing.T) {
+	httpPath := "http://localhost:3000/v1/test/profiles/p1.xml"
+	relativePath := "./p2.xml"
+	outputPath := "http://localhost:3000/v1/test/profiles/p2.xml"
+	p := &profile.Profile{
+		Imports: []profile.Import{
+			profile.Import{
+				Href: &catalog.Href{
+					URL: func() *url.URL {
+						x, _ := url.Parse(relativePath)
+						return x
+					}(),
+				},
+			},
+			profile.Import{
+				Href: &catalog.Href{
+					URL: func() *url.URL {
+						x, _ := url.Parse(httpPath)
+						return x
+					}(),
+				},
+			},
+		},
+	}
+	p, err := SetBasePath(p, httpPath)
+	if err != nil {
+		t.Error(err)
+	}
+	if p.Imports[0].Href.String() != outputPath {
+		t.Fail()
+	}
+	if p.Imports[1].Href.String() != httpPath {
+		t.Fail()
+	}
+}
+
+func TestGetAltersWithAltersPresent(t *testing.T) {
+
+	alterTitle := catalog.Title("test-title")
+	ctrlID := "ctrl-1"
+	p := &profile.Profile{
+		Imports: []profile.Import{
+			profile.Import{
+				Href: &catalog.Href{
+					URL: func() *url.URL {
+						u, _ := url.Parse("p1.xml")
+						return u
+					}(),
+				},
+				Include: &profile.Include{
+					IdSelectors: []profile.Call{
+						profile.Call{
+							ControlId: ctrlID,
+						},
+					},
+				},
+			},
+		},
+		Modify: &profile.Modify{
+			Alterations: []profile.Alter{
+				profile.Alter{
+					ControlId: ctrlID,
+					Additions: []profile.Add{
+						profile.Add{
+							Title: alterTitle,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	alters, err := GetAlters(p)
+	if err != nil {
+		t.Error(err)
+	}
+	if len(alters) == 0 {
+		t.Error("no alters found")
+	}
+	if alters[0].ControlId != ctrlID {
+		t.Fail()
+	}
+}
+
+func TestAddSubControlToControls(t *testing.T) {
+	controlDetails := catalog.Control{Id: "ac-2"}
+	subCtrlToAdd := catalog.Subcontrol{Id: "ac-2.1"}
+	g := catalog.Group{
+		Controls: []catalog.Control{catalog.Control{Id: "ac-1"}},
+	}
+	AddSubControlToControls(&g, controlDetails, subCtrlToAdd, &impl.NISTCatalog{})
+	ctrlFound := false
+	for _, x := range g.Controls {
+		if x.Id == "ac-2" {
+			ctrlFound = true
+			subCtrlFound := false
+			for _, y := range x.Subcontrols {
+				if y.Id == "ac-2.1" {
+					subCtrlFound = true
+				}
+			}
+			if !subCtrlFound {
+				t.Fail()
+			}
+			break
+		}
+	}
+	if !ctrlFound {
+		t.Fail()
+	}
+}
+
+func TestAddExistingControlToGroup(t *testing.T) {
+	ctrlToAdd := catalog.Control{Id: "ac-1"}
+	g := catalog.Group{
+		Controls: []catalog.Control{
+			catalog.Control{
+				Id: "ac-1",
+			},
+		},
+	}
+	AddControlToGroup(&g, ctrlToAdd, &impl.NISTCatalog{})
+	if len(g.Controls) > 1 {
+		t.Fail()
+	}
+}
+
+func TestInvalidGetSubControl(t *testing.T) {
+	c := profile.Call{SubcontrolId: "ac-2.1"}
+	controls := []catalog.Control{catalog.Control{Id: "ac-1"}}
+	_, err := getSubControl(c, controls, &impl.NISTCatalog{})
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestGetMappedCatalogControlsFromImport(t *testing.T) {
+	importedCatalog := catalog.Catalog{
+		Groups: []catalog.Group{
+			catalog.Group{
+				Controls: []catalog.Control{
+					catalog.Control{
+						Id: "ac-2",
+					},
+				},
+			},
+		},
+	}
+	profileImport := profile.Import{
+		Include: &profile.Include{
+			IdSelectors: []profile.Call{
+				profile.Call{
+					SubcontrolId: "ac-2.1",
+				},
+			},
+		},
+	}
+	_, err := GetMappedCatalogControlsFromImport(&importedCatalog, profileImport, &impl.NISTCatalog{})
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestValidateHref(t *testing.T) {
+	err := ValidateHref(&catalog.Href{URL: &url.URL{RawPath: ":'//:://"}})
+	if err != nil {
+		t.Fail()
+	}
+}
+func TestNilHref(t *testing.T) {
+	if err := ValidateHref(nil); err == nil {
+		t.Fail()
+	}
+}
+
+func TestInvalidCreateCatalogsFromProfile(t *testing.T) {
+	p := profile.Profile{
+		Imports: []profile.Import{
+			profile.Import{Href: &catalog.Href{URL: &url.URL{RawPath: ":'//:://"}}},
+		},
+	}
+	_, err := CreateCatalogsFromProfile(&p)
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestModifyParts(t *testing.T) {
+
+	ModifyParts(catalog.Part{}, []catalog.Part{})
 }
