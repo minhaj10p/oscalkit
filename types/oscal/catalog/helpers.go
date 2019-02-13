@@ -31,3 +31,16 @@ func NewControl(id, title string, opts *ControlOpts) Control {
 	}
 	return ctrl
 }
+
+func CreateCatalog(title Title, groups []Group) Catalog {
+	return Catalog{
+		Title:  title,
+		Groups: groups,
+	}
+}
+func CreateGroup(title Title, ctrls []Control) Group {
+	return Group{
+		Title:    title,
+		Controls: ctrls,
+	}
+}
