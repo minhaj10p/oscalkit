@@ -5,11 +5,9 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"sync"
 
 	"github.com/docker/oscalkit/types/oscal"
-	"github.com/docker/oscalkit/types/oscal/catalog"
 	"github.com/docker/oscalkit/types/oscal/profile"
 )
 
@@ -23,7 +21,23 @@ var pathmap = HTTPFilePath{
 	m: make(map[string]string),
 }
 
-func findAlter(p *profile.Profile, call profile.Call) (*profile.Alter, bool, error) {
+type AlterHandler interface {
+	GetAlters() ([]profile.Alter, error)
+}
+
+type altHandler struct {
+	pro profile.Profile
+	v   Validator
+}
+
+func NewAlterHandler(profile profile.Profile) AlterHandler {
+	return &altHandler{
+		pro: profile,
+		v:   NewValidator(),
+	}
+}
+
+func (a *altHandler) findAlter(p *profile.Profile, call profile.Call) (*profile.Alter, bool, error) {
 
 	if p.Modify == nil {
 		p.Modify = &profile.Modify{
@@ -32,12 +46,12 @@ func findAlter(p *profile.Profile, call profile.Call) (*profile.Alter, bool, err
 		}
 	}
 	for _, alt := range p.Modify.Alterations {
-		if EquateAlter(alt, call) {
+		if equateAlter(alt, call) {
 			return &alt, true, nil
 		}
 	}
 	for _, imp := range p.Imports {
-		err := ValidateHref(imp.Href)
+		err := a.v.ValidateHref(imp.Href)
 		if err != nil {
 			return nil, false, err
 		}
@@ -73,7 +87,7 @@ func findAlter(p *profile.Profile, call profile.Call) (*profile.Alter, bool, err
 			return nil, false, err
 		}
 		o.Profile = p
-		alt, found, err := findAlter(o.Profile, call)
+		alt, found, err := a.findAlter(o.Profile, call)
 		if err != nil {
 			return nil, false, err
 		}
@@ -86,7 +100,7 @@ func findAlter(p *profile.Profile, call profile.Call) (*profile.Alter, bool, err
 }
 
 // EquateAlter equates alter with call
-func EquateAlter(alt profile.Alter, call profile.Call) bool {
+func equateAlter(alt profile.Alter, call profile.Call) bool {
 
 	if alt.ControlId == "" && alt.SubcontrolId == call.SubcontrolId {
 		return true
@@ -98,27 +112,32 @@ func EquateAlter(alt profile.Alter, call profile.Call) bool {
 }
 
 // GetAlters gets alter attributes from import chain
-func GetAlters(p *profile.Profile) ([]profile.Alter, error) {
+func (a *altHandler) GetAlters() ([]profile.Alter, error) {
 
 	var alterations []profile.Alter
-	for _, i := range p.Imports {
+	for _, i := range a.pro.Imports {
+		if i.Include == nil {
+			i.Include = &profile.Include{
+				IdSelectors: []profile.Call{},
+			}
+		}
 		for _, call := range i.Include.IdSelectors {
 			found := false
-			if p.Modify == nil {
-				p.Modify = &profile.Modify{
+			if a.pro.Modify == nil {
+				a.pro.Modify = &profile.Modify{
 					Alterations:   []profile.Alter{},
 					ParamSettings: []profile.SetParam{},
 				}
 			}
-			for _, alt := range p.Modify.Alterations {
-				if EquateAlter(alt, call) {
+			for _, alt := range a.pro.Modify.Alterations {
+				if equateAlter(alt, call) {
 					alterations = append(alterations, alt)
 					found = true
 					break
 				}
 			}
 			if !found {
-				alt, found, err := findAlter(p, call)
+				alt, found, err := a.findAlter(&a.pro, call)
 				if err != nil {
 					return nil, err
 				}
@@ -132,44 +151,6 @@ func GetAlters(p *profile.Profile) ([]profile.Alter, error) {
 	}
 	return alterations, nil
 
-}
-
-// SetBasePath sets up base paths for profiles
-func SetBasePath(p *profile.Profile, parentPath string) (*profile.Profile, error) {
-	for i, x := range p.Imports {
-		err := ValidateHref(x.Href)
-		if err != nil {
-			return nil, err
-		}
-		parentURL, err := url.Parse(parentPath)
-		if err != nil {
-			return nil, err
-		}
-		// If the import href is http. Do nothing as it doesn't depend on the parent path
-		if isHTTPResource(x.Href.URL) {
-			continue
-		}
-		//if parent is HTTP, and imports are relative, modify imports to http
-		if !isHTTPResource(x.Href.URL) && isHTTPResource(parentURL) {
-			url, err := makeURL(parentURL, x.Href.URL)
-			if err != nil {
-				return nil, err
-			}
-			p.Imports[i].Href = &catalog.Href{URL: url}
-			continue
-		}
-		path := fmt.Sprintf("%s/%s", path.Dir(parentPath), path.Base(x.Href.String()))
-		path, err = filepath.Abs(path)
-		if err != nil {
-			return nil, err
-		}
-		uri, err := url.Parse(path)
-		if err != nil {
-			return nil, err
-		}
-		p.Imports[i].Href = &catalog.Href{URL: uri}
-	}
-	return p, nil
 }
 
 func makeURL(url, child *url.URL) (*url.URL, error) {
