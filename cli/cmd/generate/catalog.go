@@ -70,8 +70,9 @@ var Catalog = cli.Command{
 		if err != nil {
 			return cli.NewExitError(fmt.Errorf("failed to setup href path for profiles: %v", err), 1)
 		}
-
-		catalogs, err := generator.CreateCatalogsFromProfile(profile)
+		processorFactory := generator.NewProcessorFactory()
+		alterHandler := generator.NewAlterHandler(*profile)
+		catalogs, err := generator.CreateCatalogsFromProfile(profile, generator.NewValidator(), generator.NewImportHandler(*profile), processorFactory, alterHandler)
 		if err != nil {
 			return cli.NewExitError(fmt.Sprintf("cannot create catalogs from profile, err: %v", err), 1)
 		}

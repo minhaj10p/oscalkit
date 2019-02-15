@@ -7,11 +7,22 @@ import (
 	"github.com/docker/oscalkit/types/oscal/catalog"
 )
 
-func ValidateHref(href *catalog.Href) error {
+// Validator validates profile attributes
+type Validator interface {
+	ValidateHref(*catalog.Href) error
+}
+
+// NewValidator ...
+func NewValidator() Validator {
+	return &validator{}
+}
+
+type validator struct{}
+
+func (v *validator) ValidateHref(href *catalog.Href) error {
 	if href == nil {
 		return fmt.Errorf("Href cannot be empty")
 	}
-
 	_, err := url.Parse(href.String())
 	if err != nil {
 		return err
