@@ -748,8 +748,3 @@ func TestInvalidCreateCatalogsFromProfile(t *testing.T) {
 		t.Fail()
 	}
 }
-
-func TestModifyParts(t *testing.T) {
-
-	ModifyParts(catalog.Part{}, []catalog.Part{})
-}
