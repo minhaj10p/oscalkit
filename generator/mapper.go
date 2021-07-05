@@ -96,66 +96,74 @@ func getSubControl(call profile.Call, ctrls []catalog.Control, helper impl.Catal
 	return catalog.Subcontrol{}, fmt.Errorf("could not find subcontrol %s in catalog", call.SubcontrolId)
 }
 
+func doesCallContainSubcontrol(c profile.Call) bool {
+	return c.ControlId == ""
+}
+
+// AddControlToGroup adds control to a group
+func AddControlToGroup(g *catalog.Group, ctrl catalog.Control, catalogHelper impl.Catalog) {
+	ctrlExists := false
+	for _, x := range g.Controls {
+		if x.Id == ctrl.Id {
+			ctrlExists = true
+			continue
+		}
+	}
+	if !ctrlExists {
+		g.Controls = append(g.Controls,
+			catalog.Control{
+				Id:          ctrl.Id,
+				Class:       ctrl.Class,
+				Title:       ctrl.Title,
+				Subcontrols: []catalog.Subcontrol{},
+				Params:      ctrl.Params,
+				Parts:       ctrl.Parts,
+			},
+		)
+	}
+}
+
+// AddSubControlToControls adds subcontrols to a group. If parent ctrl of subctrl doesn't exists, it adds its parent ctrl as well
+func AddSubControlToControls(g *catalog.Group, ctrl catalog.Control, sc catalog.Subcontrol, catalogHelper impl.Catalog) {
+	ctrlExistsInGroup := false
+	for i, mappedCtrl := range g.Controls {
+		if mappedCtrl.Id == strings.ToLower(catalogHelper.GetControl(sc.Id)) {
+			ctrlExistsInGroup = true
+			g.Controls[i].Subcontrols = append(g.Controls[i].Subcontrols, sc)
+		}
+	}
+	if !ctrlExistsInGroup {
+		g.Controls = append(g.Controls,
+			catalog.Control{
+				Id:          ctrl.Id,
+				Class:       ctrl.Class,
+				Title:       ctrl.Title,
+				Params:      ctrl.Params,
+				Parts:       ctrl.Parts,
+				Subcontrols: []catalog.Subcontrol{sc},
+			})
+	}
+}
+
 // GetMappedCatalogControlsFromImport gets mapped controls in catalog per profile import
 func GetMappedCatalogControlsFromImport(importedCatalog *catalog.Catalog, profileImport profile.Import, catalogHelper impl.Catalog) (catalog.Catalog, error) {
-	newCatalog := catalog.Catalog{
-		Title:  importedCatalog.Title,
-		Groups: []catalog.Group{},
-	}
 
+	newCatalog := catalog.CreateCatalog(importedCatalog.Title, []catalog.Group{})
 	for _, group := range importedCatalog.Groups {
-		newGroup := catalog.Group{
-			Title:    group.Title,
-			Controls: []catalog.Control{},
-		}
+		newGroup := catalog.CreateGroup(group.Title, []catalog.Control{})
 		for _, ctrl := range group.Controls {
 			for _, call := range profileImport.Include.IdSelectors {
-				if call.ControlId == "" {
+				if doesCallContainSubcontrol(call) {
 					if strings.ToLower(ctrl.Id) == strings.ToLower(catalogHelper.GetControl(call.SubcontrolId)) {
-						ctrlExistsInGroup := false
 						sc, err := getSubControl(call, group.Controls, &impl.NISTCatalog{})
 						if err != nil {
 							return catalog.Catalog{}, err
 						}
-						for i, mappedCtrl := range newGroup.Controls {
-							if mappedCtrl.Id == strings.ToLower(catalogHelper.GetControl(call.SubcontrolId)) {
-								ctrlExistsInGroup = true
-								newGroup.Controls[i].Subcontrols = append(newGroup.Controls[i].Subcontrols, sc)
-							}
-						}
-						if !ctrlExistsInGroup {
-							newGroup.Controls = append(newGroup.Controls,
-								catalog.Control{
-									Id:          ctrl.Id,
-									Class:       ctrl.Class,
-									Title:       ctrl.Title,
-									Params:      ctrl.Params,
-									Parts:       ctrl.Parts,
-									Subcontrols: []catalog.Subcontrol{sc},
-								})
-						}
+						AddSubControlToControls(&newGroup, ctrl, sc, catalogHelper)
 					}
 				}
 				if strings.ToLower(call.ControlId) == strings.ToLower(ctrl.Id) {
-					ctrlExists := false
-					for _, x := range newGroup.Controls {
-						if x.Id == ctrl.Id {
-							ctrlExists = true
-							continue
-						}
-					}
-					if !ctrlExists {
-						newGroup.Controls = append(newGroup.Controls,
-							catalog.Control{
-								Id:          ctrl.Id,
-								Class:       ctrl.Class,
-								Title:       ctrl.Title,
-								Subcontrols: []catalog.Subcontrol{},
-								Params:      ctrl.Params,
-								Parts:       ctrl.Parts,
-							},
-						)
-					}
+					AddControlToGroup(&newGroup, ctrl, catalogHelper)
 				}
 			}
 		}

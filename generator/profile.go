@@ -102,6 +102,11 @@ func GetAlters(p *profile.Profile) ([]profile.Alter, error) {
 
 	var alterations []profile.Alter
 	for _, i := range p.Imports {
+		if i.Include == nil {
+			i.Include = &profile.Include{
+				IdSelectors: []profile.Call{},
+			}
+		}
 		for _, call := range i.Include.IdSelectors {
 			found := false
 			if p.Modify == nil {
